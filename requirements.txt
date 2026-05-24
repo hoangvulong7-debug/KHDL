@@ -1,6 +1,7 @@
 pandas
 numpy
+requests
+mysql-connector-python
 scikit-learn
 xgboost
 joblib
-mysql-connector-python
