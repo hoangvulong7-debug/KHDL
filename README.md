@@ -2,61 +2,147 @@
 
 ## 1. Giới thiệu dự án
 
-Đây là bài tập lớn môn Khoa học dữ liệu. Mục tiêu của dự án là xây dựng mô hình dự đoán xu hướng giá Bitcoin trong 4 giờ tiếp theo dựa trên dữ liệu nến 15 phút của cặp giao dịch BTCUSDT.
+Đây là dự án môn Khoa học dữ liệu, tập trung vào bài toán dự đoán xu hướng giá Bitcoin trong 4 giờ tiếp theo dựa trên dữ liệu nến 15 phút của cặp BTCUSDT.
 
 Bài toán được xây dựng dưới dạng phân loại nhị phân:
 
 - `0`: GIẢM
 - `1`: TĂNG
 
-Thay vì dự đoán giá cụ thể của Bitcoin, dự án tập trung vào việc dự đoán xu hướng tăng hoặc giảm trong tương lai gần.
+Thay vì dự đoán chính xác giá Bitcoin trong tương lai, dự án dự đoán xu hướng tăng hoặc giảm sau 4 giờ.
 
 ---
 
-## 2. Mục tiêu bài toán
+## 2. Pipeline tổng thể
 
-Mục tiêu chính của dự án là:
-
-- Thu thập và xử lý dữ liệu giá Bitcoin theo khung thời gian 15 phút.
-- Tạo các đặc trưng từ 16 nến 15 phút gần nhất, tương đương 4 giờ dữ liệu quá khứ.
-- Dự đoán xu hướng giá Bitcoin trong 16 nến tiếp theo, tương đương 4 giờ tương lai.
-- So sánh nhiều mô hình dự đoán khác nhau.
-- Đánh giá mô hình bằng phương pháp phù hợp với dữ liệu chuỗi thời gian.
-- Chọn ra mô hình học máy có kết quả tốt nhất.
-
----
-
-## 3. Ý tưởng chính
-
-Dự án sử dụng phương pháp rolling window.
-
-Cụ thể:
+Dự án hiện được tách thành 2 file chính:
 
 ```text
-16 nến 15 phút gần nhất  →  dự đoán 16 nến 15 phút tiếp theo
+features_full.py  → lấy dữ liệu + tạo feature + lưu MySQL/CSV
+train_model.py    → đọc feature từ MySQL + tạo target + train model
 ```
 
-Vì:
+Pipeline đầy đủ:
 
 ```text
-16 × 15 phút = 240 phút = 4 giờ
-```
-
-Nên bài toán có thể hiểu là:
-
-```text
-Dữ liệu 4 giờ quá khứ  →  Dự đoán xu hướng 4 giờ tương lai
+Binance API
+→ lấy dữ liệu nến BTCUSDT 15 phút
+→ tạo feature kỹ thuật
+→ lưu dữ liệu feature vào MySQL
+→ đọc feature từ MySQL
+→ tạo nhãn tăng/giảm sau 4 giờ
+→ train nhiều mô hình
+→ đánh giá bằng TimeSeriesSplit
+→ chọn model tốt nhất
+→ lưu model và kết quả
 ```
 
 ---
 
-## 4. Dữ liệu đầu vào
+## 3. Cấu trúc thư mục
 
-Dữ liệu sử dụng là dữ liệu nến 15 phút của BTCUSDT.
+```text
+KHDL/
+│
+├── README.md
+├── requirements.txt
+├── .gitignore
+│
+├── src/
+│   ├── features_full.py
+│   └── train_model.py
+│
+├── outputs/
+│   ├── timeseries_cv_detail.csv
+│   ├── timeseries_cv_summary.csv
+│   └── latest_prediction.csv
+│
+├── models/
+│   ├── best_btc_4h_model.pkl
+│   ├── feature_cols.pkl
+│   └── model_metadata.pkl
+│
+└── docs/
+    └── report_notes.md
+```
 
-Các cột dữ liệu cơ bản gồm:
+---
 
-| Cột | Ý nghĩa |
+## 4. File `features_full.py`
+
+File `features_full.py` chịu trách nhiệm lấy dữ liệu và tạo feature.
+
+Các công việc chính:
+
+- Lấy dữ liệu BTCUSDT khung 15 phút từ Binance API.
+- Lấy dữ liệu 2 năm gần nhất để đủ dữ liệu tính các chỉ báo như MA99, RSI, Bollinger Band, volatility.
+- Tạo các feature kỹ thuật.
+- Giữ lại 1 năm dữ liệu gần nhất.
+- Xóa các dòng bị thiếu giá trị.
+- Xuất dữ liệu feature ra CSV.
+- Lưu dữ liệu feature vào MySQL.
+
+Thông tin cấu hình chính:
+
+```python
+SYMBOL = "BTCUSDT"
+INTERVAL = "15m"
+FETCH_DAYS = 730
+FINAL_DAYS = 365
+OUTPUT_FILE = "BTCUSDT_XU_HUONG_1NAM_EXACT_FEATURES.csv"
+```
+
+Trong đó:
+
+| Tham số | Ý nghĩa |
+|---|---|
+| `SYMBOL` | Cặp giao dịch cần lấy dữ liệu |
+| `INTERVAL` | Khung thời gian của nến |
+| `FETCH_DAYS` | Số ngày dữ liệu được lấy từ Binance |
+| `FINAL_DAYS` | Số ngày dữ liệu cuối cùng được giữ lại |
+| `OUTPUT_FILE` | File CSV feature đầu ra |
+
+---
+
+## 5. Lưu dữ liệu vào MySQL
+
+Dữ liệu feature sau khi tạo sẽ được lưu vào MySQL.
+
+Cấu hình MySQL mặc định:
+
+```python
+MYSQL_HOST = "localhost"
+MYSQL_USER = "root"
+MYSQL_PASSWORD = "123456"
+MYSQL_DATABASE = "crypto_db"
+MYSQL_TABLE = "btc_features"
+```
+
+Bảng MySQL được dùng:
+
+```text
+crypto_db.btc_features
+```
+
+Bảng này lưu:
+
+- Thông tin cặp giao dịch.
+- Khung thời gian.
+- Timestamp.
+- Dữ liệu OHLCV.
+- Các feature kỹ thuật đã được tạo.
+
+Cột `ts` được dùng làm khóa chống trùng để khi chạy lại chương trình, dữ liệu cũ sẽ được cập nhật thay vì insert trùng.
+
+---
+
+## 6. Danh sách feature
+
+Các feature được chia thành nhiều nhóm.
+
+### 6.1. Dữ liệu gốc
+
+| Feature | Ý nghĩa |
 |---|---|
 | `iso` | Thời gian của nến |
 | `open` | Giá mở cửa |
@@ -66,113 +152,23 @@ Các cột dữ liệu cơ bản gồm:
 | `volume` | Khối lượng giao dịch |
 | `trades` | Số lượng giao dịch |
 
-Trong code, file dữ liệu được đọc bằng:
-
-```python
-FILE_NAME = "BTCUSDT_XU_HUONG_1NAM_FULL_FEATURE (1).csv"
-```
-
-Nếu không tìm thấy file này, chương trình sẽ thử đọc file:
-
-```python
-BTCUSDT_XU_HUONG.csv
-```
-
-Người dùng cần đặt file CSV trong đúng thư mục chạy chương trình hoặc chỉnh lại biến `FILE_NAME` trong code.
-
 ---
 
-## 5. Cấu hình bài toán
-
-Trong code, các tham số chính được khai báo như sau:
-
-```python
-WINDOW_SIZE = 16
-HORIZON = 16
-INTERVAL_MINUTES = 15
-THRESHOLD = 0.0015
-```
-
-Ý nghĩa:
-
-| Tham số | Ý nghĩa |
-|---|---|
-| `WINDOW_SIZE = 16` | Sử dụng 16 nến 15 phút gần nhất làm dữ liệu đầu vào |
-| `HORIZON = 16` | Dự đoán sau 16 nến tiếp theo |
-| `INTERVAL_MINUTES = 15` | Mỗi nến có độ dài 15 phút |
-| `THRESHOLD = 0.0015` | Ngưỡng lọc nhiễu 0.15% |
-
-Ngưỡng `THRESHOLD = 0.0015` tương đương:
-
-```text
-0.0015 = 0.15%
-```
-
-Mục đích của threshold là loại bỏ các biến động quá nhỏ, vì nếu Bitcoin chỉ tăng hoặc giảm rất nhẹ thì tín hiệu đó có thể chỉ là nhiễu thị trường.
-
----
-
-## 6. Cách tạo nhãn tăng/giảm
-
-Nhãn được tạo bằng cách so sánh giá đóng cửa sau 16 nến tiếp theo với giá đóng cửa hiện tại.
-
-Công thức:
-
-```python
-future_return_4h = future_close_4h / close_current - 1
-```
-
-Sau đó gán nhãn:
-
-```text
-future_return_4h > +0.15%  →  TĂNG = 1
-future_return_4h < -0.15%  →  GIẢM = 0
-ở giữa ±0.15%              →  bỏ khỏi tập train
-```
-
-Ví dụ:
-
-| Biến động sau 4 giờ | Nhãn |
-|---:|---|
-| +0.30% | TĂNG |
-| -0.25% | GIẢM |
-| +0.05% | Bỏ qua |
-| -0.08% | Bỏ qua |
-
-Việc loại bỏ các mẫu biến động nhỏ giúp mô hình không phải học các tín hiệu quá nhiễu.
-
----
-
-## 7. Tạo feature rolling 16 nến
-
-Phần tạo feature là bước quan trọng nhất của dự án.
-
-Với mỗi thời điểm, chương trình lấy 16 nến 15 phút gần nhất để tạo ra một dòng dữ liệu huấn luyện.
-
-Ví dụ:
-
-```text
-Tại thời điểm 14:00
-Lấy 16 nến từ 10:15 đến 14:00
-Dùng các nến này để tạo feature
-Sau đó dự đoán xu hướng từ 14:00 đến 18:00
-```
-
-Các nhóm feature chính gồm:
-
-### 7.1. Feature của từng nến
+### 6.2. Feature từng nến 15 phút
 
 | Feature | Ý nghĩa |
 |---|---|
-| `candle_return` | Lợi suất của từng nến 15 phút |
-| `candle_range_pct` | Biên độ high-low của từng nến |
-| `candle_body_pct` | Kích thước thân nến |
+| `candle_return` | Lợi suất của từng nến |
+| `candle_range_pct` | Biên độ high-low của nến |
+| `candle_body_pct` | Độ lớn thân nến |
 | `up_candle` | Nến tăng hay giảm |
-| `close_return_1` | Tỷ lệ thay đổi close so với nến trước |
+| `close_return_1` | Tỷ lệ thay đổi giá đóng cửa so với nến trước |
 
 ---
 
-### 7.2. Feature tổng hợp trong 16 nến
+### 6.3. Feature rolling window 16 nến
+
+Dự án sử dụng 16 nến 15 phút gần nhất, tương đương 4 giờ dữ liệu quá khứ.
 
 | Feature | Ý nghĩa |
 |---|---|
@@ -180,40 +176,40 @@ Các nhóm feature chính gồm:
 | `window_high` | Giá cao nhất trong 16 nến |
 | `window_low` | Giá thấp nhất trong 16 nến |
 | `window_close` | Giá đóng cửa hiện tại |
-| `window_return` | Lợi suất của toàn bộ window |
-| `window_range` | Biên độ dao động trong 16 nến |
+| `window_return` | Lợi suất từ đầu đến cuối window |
+| `window_range` | Biên độ dao động trong window |
 | `window_body_size` | Độ lớn thay đổi giá từ đầu đến cuối window |
 
 ---
 
-### 7.3. Feature về khối lượng giao dịch
+### 6.4. Feature volume
 
 | Feature | Ý nghĩa |
 |---|---|
 | `window_volume_sum` | Tổng volume trong 16 nến |
-| `window_volume_mean` | Volume trung bình |
-| `window_volume_std` | Độ lệch chuẩn của volume |
+| `window_volume_mean` | Volume trung bình trong 16 nến |
+| `window_volume_std` | Độ lệch chuẩn volume |
 | `volume_change` | Mức thay đổi volume so với nến trước |
-| `volume_ratio_16` | Volume hiện tại so với trung bình 16 nến |
+| `volume_ratio_16` | Volume hiện tại so với volume trung bình 16 nến |
 
 ---
 
-### 7.4. Feature về xu hướng và biến động
+### 6.5. Feature thống kê return
 
 | Feature | Ý nghĩa |
 |---|---|
-| `mean_15m_return` | Return trung bình của các nến 15 phút |
-| `std_15m_return` | Độ biến động của return |
-| `max_15m_return` | Nến tăng mạnh nhất trong window |
-| `min_15m_return` | Nến giảm mạnh nhất trong window |
+| `mean_15m_return` | Return trung bình trong 16 nến |
+| `std_15m_return` | Độ lệch chuẩn return |
+| `max_15m_return` | Return lớn nhất |
+| `min_15m_return` | Return nhỏ nhất |
 | `up_candle_ratio` | Tỷ lệ nến tăng trong 16 nến |
-| `close_position` | Vị trí giá đóng cửa so với vùng high-low |
-| `volatility_16` | Độ biến động trong 16 nến |
-| `volatility_32` | Độ biến động trong 32 nến |
+| `close_position` | Vị trí giá đóng cửa trong vùng high-low |
+| `volatility_16` | Độ biến động 16 nến |
+| `volatility_32` | Độ biến động 32 nến |
 
 ---
 
-### 7.5. Chỉ báo kỹ thuật
+### 6.6. Chỉ báo kỹ thuật
 
 | Feature | Ý nghĩa |
 |---|---|
@@ -231,7 +227,7 @@ Các nhóm feature chính gồm:
 
 ---
 
-### 7.6. Khoảng cách giá so với đường trung bình
+### 6.7. Khoảng cách giá so với đường trung bình
 
 | Feature | Ý nghĩa |
 |---|---|
@@ -239,44 +235,83 @@ Các nhóm feature chính gồm:
 | `distance_ma25` | Khoảng cách giá hiện tại so với MA25 |
 | `distance_ma99` | Khoảng cách giá hiện tại so với MA99 |
 
-Các feature này giúp mô hình biết giá hiện tại đang nằm trên hay dưới xu hướng trung bình.
+---
+
+## 7. File `train_model.py`
+
+File `train_model.py` không còn đọc dữ liệu trực tiếp từ CSV nữa.
+
+Thay vào đó, file này đọc dữ liệu feature từ MySQL:
+
+```text
+crypto_db.btc_features
+```
+
+Luồng xử lý của `train_model.py`:
+
+```text
+Kết nối MySQL
+→ đọc feature từ bảng btc_features
+→ sắp xếp theo thời gian
+→ tạo target 4 giờ sau
+→ lọc nhiễu bằng threshold
+→ chuẩn bị X, y
+→ train và đánh giá model
+→ lưu kết quả
+→ dự đoán 4 giờ tới
+```
 
 ---
 
-## 8. Kiểm tra window hợp lệ
+## 8. Tạo target dự đoán 4 giờ sau
 
-Code kiểm tra xem 16 nến quá khứ có liên tục hay không:
-
-```python
-valid_past_window
-```
-
-Điều kiện:
-
-```text
-Có đủ 16 nến
-Và thời gian từ nến đầu đến nến cuối đúng bằng 3 giờ 45 phút
-```
-
-Lý do là 16 nến có 15 khoảng cách giữa các nến:
-
-```text
-15 khoảng × 15 phút = 225 phút = 3 giờ 45 phút
-```
-
-Ngoài ra, code cũng kiểm tra dữ liệu tương lai có đúng cách 4 giờ không:
+Các tham số chính:
 
 ```python
-valid_future_window
+WINDOW_SIZE = 16
+HORIZON = 16
+INTERVAL_MINUTES = 15
+THRESHOLD = 0.0015
 ```
 
-Việc kiểm tra này giúp tránh trường hợp dữ liệu bị thiếu nến làm sai lệch quá trình train.
+Ý nghĩa:
+
+| Tham số | Ý nghĩa |
+|---|---|
+| `WINDOW_SIZE = 16` | Dùng 16 nến gần nhất làm dữ liệu quá khứ |
+| `HORIZON = 16` | Dự đoán 16 nến tiếp theo |
+| `INTERVAL_MINUTES = 15` | Mỗi nến dài 15 phút |
+| `THRESHOLD = 0.0015` | Ngưỡng lọc nhiễu 0.15% |
+
+Vì:
+
+```text
+16 × 15 phút = 240 phút = 4 giờ
+```
+
+nên mô hình dự đoán xu hướng sau 4 giờ.
+
+Công thức tạo biến động tương lai:
+
+```python
+future_return_4h = future_close_4h / close - 1
+```
+
+Cách gán nhãn:
+
+```text
+future_return_4h > +0.15%  →  TĂNG = 1
+future_return_4h < -0.15%  →  GIẢM = 0
+nằm giữa ±0.15%            →  bỏ khỏi tập train
+```
+
+Mục đích của threshold là loại bỏ các biến động quá nhỏ, vì các biến động nhỏ thường bị nhiễu và khó dự đoán.
 
 ---
 
 ## 9. Các mô hình sử dụng
 
-Dự án so sánh các mô hình sau:
+Dự án so sánh 4 mô hình:
 
 1. Random Walk baseline
 2. Logistic Regression
@@ -292,29 +327,19 @@ Random Walk là mô hình baseline đơn giản, không phải mô hình học m
 Quy tắc:
 
 ```text
-Nếu 16 nến gần nhất đang tăng  →  dự đoán TĂNG
-Nếu 16 nến gần nhất đang giảm  →  dự đoán GIẢM
+Nếu window_return > 0  → dự đoán TĂNG
+Nếu window_return <= 0 → dự đoán GIẢM
 ```
 
-Random Walk được dùng để kiểm tra xem các mô hình học máy có thật sự tốt hơn một quy tắc đơn giản hay không.
-
-Nếu mô hình học máy không vượt được Random Walk, điều đó cho thấy dữ liệu còn nhiễu hoặc feature chưa đủ mạnh.
+Random Walk được dùng để kiểm tra xem các mô hình học máy có tốt hơn một quy tắc đơn giản hay không.
 
 ---
 
 ## 11. Logistic Regression
 
-Logistic Regression là mô hình tuyến tính dùng để phân loại nhị phân.
+Logistic Regression là mô hình tuyến tính cho bài toán phân loại nhị phân.
 
-Mô hình học một công thức dạng:
-
-```text
-score = w1*x1 + w2*x2 + ... + b
-```
-
-Sau đó đưa qua hàm sigmoid để tạo xác suất tăng.
-
-Trong code, Logistic Regression được đặt trong pipeline:
+Trong dự án, mô hình được đặt trong pipeline:
 
 ```python
 Pipeline([
@@ -331,20 +356,16 @@ Pipeline([
 
 | Thành phần | Ý nghĩa |
 |---|---|
-| `StandardScaler()` | Chuẩn hóa dữ liệu đầu vào |
-| `max_iter=1000` | Số vòng lặp tối đa khi train |
-| `class_weight="balanced"` | Cân bằng trọng số hai lớp |
-| `random_state=42` | Giúp kết quả ổn định hơn |
-
-Logistic Regression thường đơn giản, dễ giải thích và ít bị overfitting hơn các mô hình phức tạp.
+| `StandardScaler()` | Chuẩn hóa feature |
+| `max_iter=1000` | Tăng số vòng lặp tối đa |
+| `class_weight="balanced"` | Cân bằng hai lớp TĂNG/GIẢM |
+| `random_state=42` | Giúp kết quả ổn định |
 
 ---
 
 ## 12. Random Forest
 
-Random Forest là mô hình ensemble gồm nhiều cây quyết định độc lập.
-
-Mỗi cây đưa ra một dự đoán, sau đó mô hình lấy kết quả theo đa số phiếu.
+Random Forest gồm nhiều cây quyết định độc lập.
 
 Trong code:
 
@@ -361,41 +382,15 @@ RandomForestClassifier(
 )
 ```
 
-Ý nghĩa:
-
-| Tham số | Ý nghĩa |
-|---|---|
-| `n_estimators=300` | Số lượng cây |
-| `max_depth=5` | Giới hạn độ sâu của cây |
-| `min_samples_leaf=30` | Số mẫu tối thiểu ở mỗi lá |
-| `min_samples_split=60` | Số mẫu tối thiểu để tiếp tục tách |
-| `max_features="sqrt"` | Mỗi cây chỉ dùng một phần feature |
-| `class_weight="balanced_subsample"` | Cân bằng lớp trong từng cây |
-| `n_jobs=-1` | Dùng tối đa CPU để train |
-
-Các tham số này giúp giảm overfitting vì dữ liệu Bitcoin có nhiều nhiễu.
+Các tham số như `max_depth`, `min_samples_leaf`, `min_samples_split` giúp hạn chế overfitting vì dữ liệu Bitcoin có độ nhiễu cao.
 
 ---
 
 ## 13. XGBoost
 
-XGBoost là viết tắt của Extreme Gradient Boosting.
+XGBoost là mô hình boosting gồm nhiều cây quyết định được train tuần tự.
 
-Đây là mô hình ensemble gồm nhiều cây quyết định, nhưng khác Random Forest ở cách train.
-
-Random Forest train nhiều cây độc lập rồi bỏ phiếu.
-
-XGBoost train cây theo thứ tự:
-
-```text
-Cây 1 dự đoán
-→ tính lỗi
-→ cây 2 sửa lỗi cây 1
-→ cây 3 sửa lỗi tiếp
-→ ...
-```
-
-Nói cách khác, cây sau tập trung sửa lỗi của cây trước.
+Khác với Random Forest, XGBoost train cây sau để sửa lỗi cho cây trước.
 
 Trong code:
 
@@ -419,37 +414,30 @@ XGBClassifier(
 )
 ```
 
-Ý nghĩa các tham số:
+Ý nghĩa:
 
 | Tham số | Ý nghĩa |
 |---|---|
-| `objective="binary:logistic"` | Bài toán phân loại nhị phân |
+| `objective="binary:logistic"` | Phân loại nhị phân |
 | `n_estimators=500` | Số cây boosting |
-| `max_depth=3` | Độ sâu tối đa của mỗi cây |
+| `max_depth=3` | Độ sâu tối đa mỗi cây |
 | `learning_rate=0.04` | Tốc độ học |
 | `subsample=0.85` | Mỗi cây dùng 85% dữ liệu |
 | `colsample_bytree=0.85` | Mỗi cây dùng 85% feature |
 | `min_child_weight=3` | Hạn chế chia nhánh quá nhỏ |
-| `gamma=0.0` | Mức phạt khi tách nhánh |
 | `reg_alpha=0.01` | L1 regularization |
 | `reg_lambda=1.0` | L2 regularization |
-| `eval_metric="logloss"` | Hàm đánh giá trong lúc train |
-| `tree_method="hist"` | Phương pháp train cây nhanh hơn |
-| `scale_pos_weight` | Cân bằng lớp TĂNG/GIẢM |
+| `scale_pos_weight` | Cân bằng lớp |
 
-XGBoost mạnh vì có thể học được các quan hệ phi tuyến giữa các feature như RSI, MACD, volume, volatility và return.
-
-Tuy nhiên, do dữ liệu tài chính rất nhiễu, XGBoost cũng có nguy cơ overfitting nếu mô hình quá phức tạp.
+XGBoost có khả năng học quan hệ phi tuyến giữa các feature như RSI, MACD, volume, volatility và return.
 
 ---
 
 ## 14. Đánh giá bằng TimeSeriesSplit
 
-Vì dữ liệu Bitcoin là dữ liệu chuỗi thời gian, dự án không chia train/test ngẫu nhiên.
+Vì dữ liệu Bitcoin là chuỗi thời gian, dự án không chia train/test ngẫu nhiên.
 
-Nếu shuffle dữ liệu, thông tin tương lai có thể bị lẫn vào tập train, gây sai lệch kết quả.
-
-Do đó, dự án sử dụng:
+Thay vào đó, dự án dùng:
 
 ```python
 TimeSeriesSplit(n_splits=5, gap=HORIZON)
@@ -459,27 +447,21 @@ TimeSeriesSplit(n_splits=5, gap=HORIZON)
 
 | Tham số | Ý nghĩa |
 |---|---|
-| `n_splits=5` | Chia dữ liệu thành 5 fold theo thời gian |
-| `gap=HORIZON` | Tạo khoảng cách giữa train và test |
+| `n_splits=5` | Chia thành 5 fold theo thời gian |
+| `gap=HORIZON` | Tạo khoảng cách 16 nến giữa train và test |
 
-Cách hoạt động:
+Cách này giúp mô phỏng đúng hơn thực tế:
 
 ```text
-Fold 1: train quá khứ ngắn      → test đoạn tương lai
-Fold 2: train quá khứ dài hơn   → test đoạn tương lai tiếp theo
-Fold 3: train dài hơn nữa       → test đoạn tiếp theo
-...
+Train bằng dữ liệu quá khứ
+Test trên dữ liệu tương lai
 ```
-
-Cách này phù hợp với bài toán dự đoán thời gian vì mô hình luôn được train bằng dữ liệu quá khứ và test trên dữ liệu tương lai.
 
 ---
 
 ## 15. Hàm đánh giá mô hình
 
-Sau khi mỗi mô hình dự đoán xong, dự án sử dụng hàm `evaluate_model()` để tính các chỉ số đánh giá.
-
-Các chỉ số gồm:
+Sau khi dự đoán xong, dự án dùng các chỉ số:
 
 | Chỉ số | Ý nghĩa |
 |---|---|
@@ -494,88 +476,46 @@ Các chỉ số gồm:
 | `recall_tang` | Trong các lần thật sự TĂNG, mô hình bắt được bao nhiêu |
 | `f1_tang` | F1-score của lớp TĂNG |
 
-Dự án không chỉ dùng Accuracy vì Accuracy có thể gây hiểu nhầm nếu mô hình bị lệch về một lớp.
-
-Ví dụ, nếu mô hình thường xuyên dự đoán TĂNG, nó có thể đúng nhiều khi thị trường tăng nhiều, nhưng lại dự đoán GIẢM rất kém.
-
-Vì vậy, dự án ưu tiên:
+Dự án ưu tiên chọn model theo thứ tự:
 
 ```text
 macro_f1 → balanced_accuracy → roc_auc
 ```
 
+Lý do là không muốn model chỉ dự đoán tốt một chiều TĂNG hoặc GIẢM.
+
 ---
 
 ## 16. Kết quả đầu ra
 
-Sau khi chạy chương trình, các file kết quả được tạo ra:
+Sau khi chạy `train_model.py`, chương trình tạo ra:
 
 | File | Ý nghĩa |
 |---|---|
-| `timeseries_cv_detail.csv` | Kết quả chi tiết từng fold |
-| `timeseries_cv_summary.csv` | Kết quả trung bình theo từng model |
-| `best_btc_4h_model.pkl` | Model tốt nhất đã được lưu |
-| `feature_cols.pkl` | Danh sách feature dùng khi train |
-| `model_metadata.pkl` | Thông tin cấu hình của mô hình |
+| `outputs/timeseries_cv_detail.csv` | Kết quả chi tiết từng fold |
+| `outputs/timeseries_cv_summary.csv` | Kết quả trung bình theo từng model |
+| `outputs/latest_prediction.csv` | Dự đoán mới nhất |
+| `models/best_btc_4h_model.pkl` | Model ML tốt nhất |
+| `models/feature_cols.pkl` | Danh sách feature |
+| `models/model_metadata.pkl` | Thông tin cấu hình model |
 
 ---
 
-## 17. Cách chọn mô hình tốt nhất
+## 17. Cài đặt thư viện
 
-Sau khi đánh giá bằng TimeSeriesSplit, chương trình tổng hợp kết quả trung bình của từng model.
-
-Mô hình được sắp xếp theo:
-
-```text
-macro_f1
-balanced_accuracy
-roc_auc
-```
-
-Mô hình có điểm cao nhất theo thứ tự này được chọn làm mô hình tốt nhất trong nhóm mô hình học máy.
-
-Nếu Random Walk baseline có kết quả cao, nó vẫn được xem là baseline để tham khảo, nhưng mô hình cuối cùng nên được chọn trong nhóm mô hình học máy như Logistic Regression, Random Forest hoặc XGBoost.
-
----
-
-## 18. Dự đoán bằng 16 nến gần nhất
-
-Sau khi train xong, chương trình tiếp tục lấy 16 nến 15 phút gần nhất để dự đoán xu hướng 4 giờ tới.
-
-Kết quả in ra gồm:
-
-```text
-Dự đoán: TĂNG hoặc GIẢM
-Xác suất GIẢM
-Xác suất TĂNG
-```
-
-Ví dụ:
-
-```text
-XGBoost:
-Dự đoán: TĂNG
-Xác suất GIẢM: 0.430
-Xác suất TĂNG: 0.570
-```
-
-Điều này giúp người dùng không chỉ biết mô hình dự đoán tăng hay giảm, mà còn biết mức độ tự tin của mô hình.
-
----
-
-## 19. Cách cài đặt
-
-Cài các thư viện cần thiết:
+Cài thư viện cần thiết:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-Nội dung file `requirements.txt`:
+Nội dung `requirements.txt`:
 
 ```txt
 pandas
 numpy
+requests
+mysql-connector-python
 scikit-learn
 xgboost
 joblib
@@ -583,110 +523,104 @@ joblib
 
 ---
 
-## 20. Cách chạy
+## 18. Cách chạy dự án
 
-Chạy file train:
+### Bước 1: Chạy file tạo feature
+
+```bash
+python src/features_full.py
+```
+
+File này sẽ:
+
+```text
+Lấy dữ liệu từ Binance
+→ tạo feature
+→ lưu CSV
+→ lưu vào MySQL
+```
+
+### Bước 2: Chạy file train model
 
 ```bash
 python src/train_model.py
 ```
 
-Nếu file code không nằm trong thư mục `src`, có thể chạy:
+File này sẽ:
+
+```text
+Đọc feature từ MySQL
+→ tạo target
+→ train model
+→ đánh giá model
+→ lưu kết quả
+→ dự đoán 4 giờ tới
+```
+
+Nếu file không nằm trong thư mục `src`, chạy:
 
 ```bash
+python features_full.py
 python train_model.py
 ```
 
-Lưu ý: cần đặt file CSV dữ liệu đúng tên hoặc sửa lại biến `FILE_NAME` trong code.
-
 ---
 
-## 21. Cấu trúc thư mục đề xuất
+## 19. Lưu ý khi dùng MySQL
 
-```text
-KHDL/
-│
-├── README.md
-├── requirements.txt
-├── .gitignore
-│
-├── src/
-│   └── train_model.py
-│
-├── outputs/
-│   ├── timeseries_cv_detail.csv
-│   └── timeseries_cv_summary.csv
-│
-├── models/
-│   ├── best_btc_4h_model.pkl
-│   ├── feature_cols.pkl
-│   └── model_metadata.pkl
-│
-└── data/
-    └── BTCUSDT_XU_HUONG_1NAM_FULL_FEATURE.csv
+Cần cài MySQL và tạo kết nối đúng với thông tin trong code:
+
+```python
+MYSQL_HOST = "localhost"
+MYSQL_USER = "root"
+MYSQL_PASSWORD = "123456"
+MYSQL_DATABASE = "crypto_db"
+MYSQL_TABLE = "btc_features"
 ```
 
----
+Nếu mật khẩu MySQL khác, cần sửa lại `MYSQL_PASSWORD`.
 
-## 22. Nhận xét kết quả
-
-Kết quả thực nghiệm cho thấy bài toán dự đoán xu hướng Bitcoin trong 4 giờ tới là bài toán khó do thị trường có nhiều nhiễu.
-
-Một mô hình phức tạp hơn như XGBoost không phải lúc nào cũng chắc chắn vượt trội tuyệt đối so với các mô hình đơn giản hơn.
-
-Vì vậy, dự án so sánh nhiều mô hình và sử dụng TimeSeriesSplit để đánh giá công bằng hơn.
-
-Nếu Random Walk baseline đạt kết quả cao, điều đó cho thấy thị trường trong giai đoạn kiểm thử có thể tồn tại yếu tố momentum ngắn hạn, tức xu hướng gần nhất có thể tiếp diễn trong ngắn hạn.
-
-Nếu XGBoost hoặc Logistic Regression đạt kết quả tốt hơn, điều đó cho thấy các feature kỹ thuật như RSI, MACD, volume, volatility có thể cung cấp thêm thông tin cho mô hình.
+Khi đưa code lên GitHub public, không nên để mật khẩu thật trong code. Có thể dùng biến môi trường hoặc file `.env`.
 
 ---
 
-## 23. Hạn chế của dự án
+## 20. Nhận xét kết quả
+
+Kết quả thực nghiệm cho thấy bài toán dự đoán xu hướng Bitcoin trong 4 giờ tới là bài toán khó, vì thị trường có nhiều nhiễu.
+
+Nếu Random Walk baseline đạt kết quả cao, điều này cho thấy trong dữ liệu có thể tồn tại momentum ngắn hạn, tức xu hướng gần đây có thể tiếp diễn trong ngắn hạn.
+
+Nếu XGBoost hoặc Logistic Regression đạt kết quả tốt hơn baseline, điều này cho thấy các feature kỹ thuật như RSI, MACD, volume, volatility có thể cung cấp thêm thông tin cho mô hình.
+
+Tuy nhiên, các chỉ số thường chỉ quanh mức gần 0.5, cho thấy việc dự đoán xu hướng Bitcoin ngắn hạn không dễ và cần thêm cải tiến.
+
+---
+
+## 21. Hạn chế
 
 Một số hạn chế hiện tại:
 
-- Chỉ sử dụng dữ liệu OHLCV, chưa dùng dữ liệu order book.
-- Chưa sử dụng tin tức, tâm lý thị trường hoặc dữ liệu vĩ mô.
+- Chỉ sử dụng dữ liệu OHLCV.
+- Chưa dùng dữ liệu order book.
+- Chưa dùng funding rate, open interest.
+- Chưa dùng tin tức hoặc sentiment thị trường.
 - Chưa backtest lợi nhuận thực tế.
-- Chưa tính phí giao dịch, trượt giá và quản trị rủi ro.
-- Mô hình chỉ dự đoán xu hướng tăng/giảm, chưa dự đoán mức tăng/giảm cụ thể.
-- Dữ liệu Bitcoin có độ nhiễu cao nên kết quả có thể thay đổi theo từng giai đoạn thị trường.
+- Chưa tính phí giao dịch và trượt giá.
+- Mô hình chỉ dự đoán TĂNG/GIẢM, chưa dự đoán mức biến động cụ thể.
 
 ---
 
-## 24. Hướng phát triển
+## 22. Hướng phát triển
 
-Trong tương lai, dự án có thể được cải tiến theo các hướng sau:
+Các hướng cải tiến:
 
-- Kết nối Binance API để lấy dữ liệu realtime.
-- Tự động cập nhật dữ liệu mỗi 15 phút.
+- Tự động cập nhật dữ liệu realtime từ Binance.
 - Tối ưu hyperparameter bằng TimeSeriesSplit.
-- Bổ sung feature từ order book, funding rate, open interest.
-- Bổ sung dữ liệu tin tức hoặc sentiment thị trường.
-- Xây dựng dashboard hiển thị xác suất tăng/giảm.
-- Thêm backtest chiến lược giao dịch dựa trên tín hiệu mô hình.
-- Tính thêm phí giao dịch, slippage, stop-loss và take-profit.
-- Thử thêm các mô hình khác như LightGBM, CatBoost, LSTM hoặc Transformer.
+- Bổ sung order book, funding rate, open interest.
+- Thêm dữ liệu tin tức hoặc sentiment.
+- Thêm backtest chiến lược giao dịch.
+- Tính phí giao dịch, slippage, stop-loss và take-profit.
+- Xây dựng dashboard hiển thị xác suất TĂNG/GIẢM.
+- Thử thêm LightGBM, CatBoost, LSTM hoặc Transformer.
 
 ---
-
-## 25. Kết luận
-
-Dự án đã xây dựng một pipeline hoàn chỉnh để dự đoán xu hướng Bitcoin trong 4 giờ tới.
-
-Pipeline gồm các bước:
-
-```text
-Đọc dữ liệu nến 15 phút
-→ Tạo feature rolling 16 nến
-→ Tạo nhãn tăng/giảm sau 16 nến
-→ Lọc nhiễu bằng threshold
-→ Train nhiều mô hình
-→ Đánh giá bằng TimeSeriesSplit
-→ So sánh bằng nhiều chỉ số
-→ Lưu model tốt nhất
-→ Dự đoán xu hướng 4 giờ tới
-```
-
-Dự án cho thấy việc dự đoán xu hướng Bitcoin ngắn hạn là một bài toán khó, nhưng thông qua việc tạo feature kỹ thuật, dùng threshold giảm nhiễu và đánh giá bằng TimeSeriesSplit, mô hình có thể được kiểm tra một cách nghiêm túc và phù hợp hơn với dữ liệu chuỗi thời gian.
